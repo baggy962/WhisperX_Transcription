@@ -32,6 +32,8 @@ if %ERRORLEVEL% neq 0 (
 )
 echo [OK] Conda found
 echo.
+echo [DEBUG] Moving to Step 2...
+echo.
 
 REM Environment name
 set ENV_NAME=whisper-transcriber
@@ -62,17 +64,7 @@ if %ERRORLEVEL% neq 0 (
 echo [OK] Environment created
 echo.
 
-echo [Step 4/7] Activating environment...
-call conda activate %ENV_NAME%
-if %ERRORLEVEL% neq 0 (
-    echo [ERROR] Failed to activate environment!
-    pause
-    exit /b 1
-)
-echo [OK] Environment activated
-echo.
-
-echo [Step 5/7] Checking for CUDA availability...
+echo [Step 4/7] Checking for CUDA availability...
 where nvcc >nul 2>nul
 if %ERRORLEVEL% equ 0 (
     echo [OK] CUDA detected - Will install PyTorch with GPU support
@@ -86,13 +78,13 @@ if %ERRORLEVEL% equ 0 (
 )
 echo.
 
-echo [Step 6/7] Installing PyTorch...
+echo [Step 5/7] Installing PyTorch in environment...
 if "%CUDA_AVAILABLE%"=="1" (
     echo Installing PyTorch with CUDA support...
-    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+    call conda run -n %ENV_NAME% pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ) else (
-    echo Installing PyTorch (CPU only)...
-    pip install torch torchvision torchaudio
+    echo Installing PyTorch CPU-only...
+    call conda run -n %ENV_NAME% pip install torch torchvision torchaudio
 )
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to install PyTorch!
@@ -102,7 +94,7 @@ if %ERRORLEVEL% neq 0 (
 echo [OK] PyTorch installed
 echo.
 
-echo [Step 7/7] Installing application dependencies...
+echo [Step 6/7] Installing application dependencies...
 if not exist "requirements.txt" (
     echo [ERROR] requirements.txt not found!
     echo Please ensure this script is run from the project directory.
@@ -110,13 +102,19 @@ if not exist "requirements.txt" (
     exit /b 1
 )
 
-pip install -r requirements.txt
+echo Installing dependencies to environment...
+call conda run -n %ENV_NAME% pip install -r requirements.txt
 if %ERRORLEVEL% neq 0 (
     echo [ERROR] Failed to install dependencies!
     pause
     exit /b 1
 )
 echo [OK] All dependencies installed
+echo.
+
+echo [Step 7/7] Verifying installation...
+call conda run -n %ENV_NAME% python --version
+echo [OK] Installation verified
 echo.
 
 echo ========================================================================
