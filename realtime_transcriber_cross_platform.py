@@ -492,6 +492,7 @@ class TranscriberGUI:
         try:
             from transformers import pipeline
             import torch
+            import warnings
             
             # Clear existing model
             if self.model is not None:
@@ -500,23 +501,47 @@ class TranscriberGUI:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             
-            # Load medical model using transformers pipeline
-            device_str = "cuda:0" if self.device == "cuda" and torch.cuda.is_available() else "cpu"
-            torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+            # Determine device
+            use_gpu = self.device == "cuda" and torch.cuda.is_available()
             
-            print(f"Loading medical model from Hugging Face on {device_str}...")
-            
-            self.medical_model = pipeline(
-                "automatic-speech-recognition",
-                model=self.MEDICAL_MODEL,
-                device=device_str,
-                torch_dtype=torch_dtype,
-                model_kwargs={"cache_dir": self.medical_model_path}
-            )
-            
-            self.medical_model_loaded = True
-            self.status_label.config(text="Ready (Medical Mode)")
-            print(f"Medical model loaded successfully")
+            # Try GPU first, fallback to CPU if CUDA error
+            for attempt, (device_str, dtype) in enumerate([
+                ("cuda:0" if use_gpu else "cpu", torch.float16 if use_gpu else torch.float32),
+                ("cpu", torch.float32)  # Fallback
+            ]):
+                if attempt > 0 and device_str == "cpu":
+                    print("GPU failed, falling back to CPU for medical model...")
+                    
+                try:
+                    print(f"Loading medical model from Hugging Face on {device_str}...")
+                    
+                    # Suppress chunking warning
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
+                        
+                        self.medical_model = pipeline(
+                            "automatic-speech-recognition",
+                            model=self.MEDICAL_MODEL,
+                            device=device_str,
+                            torch_dtype=dtype,
+                            model_kwargs={"cache_dir": self.medical_model_path}
+                        )
+                    
+                    self.medical_model_loaded = True
+                    self.medical_device = device_str
+                    self.status_label.config(text=f"Ready (Medical Mode - {device_str.upper()})")
+                    print(f"Medical model loaded successfully on {device_str}")
+                    return  # Success!
+                    
+                except RuntimeError as e:
+                    if "CUDA" in str(e) and attempt == 0:
+                        # CUDA error, try CPU
+                        print(f"CUDA error: {e}")
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                        continue
+                    else:
+                        raise  # Re-raise if not CUDA error or already on CPU
             
         except Exception as e:
             print(f"Error loading medical model: {e}")
@@ -955,6 +980,8 @@ class TranscriberGUI:
     
     def _transcribe_with_medical_model(self, audio):
         """Transcribe using Hugging Face medical model."""
+        import warnings
+        
         # Build medical context prompt
         initial_prompt = ""
         if self.all_transcriptions:
@@ -968,19 +995,84 @@ class TranscriberGUI:
             vocab_hint = ", ".join(list(self.medical_vocabulary)[:20])
             initial_prompt = f"Medical terms: {vocab_hint}. {initial_prompt}" if initial_prompt else f"Medical terms: {vocab_hint}"
         
-        # Transcribe using pipeline
-        result = self.medical_model(
-            audio,
-            chunk_length_s=30,
-            stride_length_s=5,
-            return_timestamps=False,
-            generate_kwargs={
-                "task": "transcribe",
-                "language": "en"
-            }
-        )
-        
-        return result["text"].strip() if result and "text" in result else ""
+        try:
+            # Calculate audio duration
+            audio_duration = len(audio) / self.sample_rate
+            
+            # For short audio (<30s), don't use chunking
+            # For longer audio, use chunking despite the warning
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
+                
+                if audio_duration <= 30:
+                    # Short audio - no chunking needed
+                    result = self.medical_model(
+                        audio,
+                        return_timestamps=False,
+                        generate_kwargs={
+                            "task": "transcribe",
+                            "language": "en"
+                        }
+                    )
+                else:
+                    # Long audio - use chunking
+                    result = self.medical_model(
+                        audio,
+                        chunk_length_s=30,
+                        stride_length_s=5,
+                        return_timestamps=False,
+                        generate_kwargs={
+                            "task": "transcribe",
+                            "language": "en"
+                        }
+                    )
+            
+            return result["text"].strip() if result and "text" in result else ""
+            
+        except RuntimeError as e:
+            if "CUDA" in str(e):
+                print(f"CUDA error in medical transcription: {e}")
+                print("Trying to reload medical model on CPU...")
+                # Try to reload on CPU
+                self._load_medical_model_cpu_fallback()
+                # Retry transcription
+                return self._transcribe_with_medical_model(audio)
+            else:
+                raise
+    
+    def _load_medical_model_cpu_fallback(self):
+        """Reload medical model on CPU after CUDA error."""
+        try:
+            from transformers import pipeline
+            import torch
+            import warnings
+            
+            if self.medical_model is not None:
+                del self.medical_model
+                self.medical_model = None
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            print("Loading medical model on CPU (fallback)...")
+            
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
+                
+                self.medical_model = pipeline(
+                    "automatic-speech-recognition",
+                    model=self.MEDICAL_MODEL,
+                    device="cpu",
+                    torch_dtype=torch.float32,
+                    model_kwargs={"cache_dir": self.medical_model_path}
+                )
+            
+            self.medical_device = "cpu"
+            self.status_label.config(text="Ready (Medical Mode - CPU)")
+            print("Medical model reloaded on CPU")
+            
+        except Exception as e:
+            print(f"Failed to reload medical model on CPU: {e}")
+            raise
     
     def _enhance_medical_terms(self, text):
         """Enhance medical terminology in transcribed text using vocabulary."""
