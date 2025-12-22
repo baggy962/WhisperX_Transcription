@@ -228,9 +228,8 @@ class TranscriberGUI:
     ]
     
     MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
-    MEDICAL_MODEL = "Crystalcareai/Whisper-Medicalv1"
     
-    # Medical vocabulary file
+    # Medical vocabulary file for context injection
     MEDICAL_VOCAB_FILE = "medical_vocabulary.txt"
     
     def __init__(self):
@@ -281,11 +280,9 @@ class TranscriberGUI:
         self.previous_transcription = ""
         self.all_transcriptions = []
         
-        # Medical mode
-        self.medical_mode = False
+        # Medical vocabulary for context injection
+        self.use_medical_vocab = False
         self.medical_vocabulary = self._load_medical_vocabulary()
-        self.medical_model = None
-        self.medical_model_loaded = False
         
         # Platform-specific managers
         self.clipboard = ClipboardManager()
@@ -294,12 +291,9 @@ class TranscriberGUI:
         # Tray icon (Windows only)
         self.tray_icon = None
         
-        # Model paths
+        # Model path
         self.model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         os.makedirs(self.model_path, exist_ok=True)
-        
-        self.medical_model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "medical_models")
-        os.makedirs(self.medical_model_path, exist_ok=True)
         
         self._create_gui()
         self._setup_platform_features()
@@ -453,109 +447,6 @@ class TranscriberGUI:
         
         if self.current_model_size:
             self._load_model(self.current_model_size)
-    
-    def _toggle_medical_mode(self):
-        """Toggle between general and medical transcription modes."""
-        self.medical_mode = not self.medical_mode
-        
-        if self.is_recording:
-            self._stop_recording()
-        
-        if self.medical_mode:
-            # Switch to medical mode
-            self.status_label.config(text="Loading medical model...")
-            self.root.update()
-            self._load_medical_model()
-            self.medical_mode_btn.config(text="Medical Mode: ON", bg="#4CAF50", fg="white")
-        else:
-            # Switch back to general mode
-            # Clear medical model
-            if self.medical_model is not None:
-                del self.medical_model
-                self.medical_model = None
-                self.medical_model_loaded = False
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            
-            # Reload general model
-            if self.current_model_size:
-                self.status_label.config(text=f"Loading {self.current_model_size}...")
-                self.root.update()
-                self._load_model(self.current_model_size)
-            self.medical_mode_btn.config(text="Medical Mode: OFF", bg="#9E9E9E", fg="white")
-        
-        print(f"Mode switched to: {'Medical' if self.medical_mode else 'General'}")
-    
-    def _load_medical_model(self):
-        """Load the Crystalcareai medical Whisper model from Hugging Face."""
-        try:
-            from transformers import pipeline
-            import torch
-            import warnings
-            
-            # Clear existing model
-            if self.model is not None:
-                del self.model
-                self.model = None
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            
-            # Determine device
-            use_gpu = self.device == "cuda" and torch.cuda.is_available()
-            
-            # Try GPU first, fallback to CPU if CUDA error
-            for attempt, (device_str, dtype) in enumerate([
-                ("cuda:0" if use_gpu else "cpu", torch.float16 if use_gpu else torch.float32),
-                ("cpu", torch.float32)  # Fallback
-            ]):
-                if attempt > 0 and device_str == "cpu":
-                    print("GPU failed, falling back to CPU for medical model...")
-                    
-                try:
-                    print(f"Loading medical model from Hugging Face on {device_str}...")
-                    
-                    # Suppress chunking warning
-                    with warnings.catch_warnings():
-                        warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
-                        
-                        self.medical_model = pipeline(
-                            "automatic-speech-recognition",
-                            model=self.MEDICAL_MODEL,
-                            device=device_str,
-                            torch_dtype=dtype,
-                            model_kwargs={"cache_dir": self.medical_model_path}
-                        )
-                    
-                    self.medical_model_loaded = True
-                    self.medical_device = device_str
-                    self.status_label.config(text=f"Ready (Medical Mode - {device_str.upper()})")
-                    print(f"Medical model loaded successfully on {device_str}")
-                    return  # Success!
-                    
-                except RuntimeError as e:
-                    if "CUDA" in str(e) and attempt == 0:
-                        # CUDA error, try CPU
-                        print(f"CUDA error: {e}")
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                        continue
-                    else:
-                        raise  # Re-raise if not CUDA error or already on CPU
-            
-        except Exception as e:
-            print(f"Error loading medical model: {e}")
-            self.status_label.config(text="Error loading medical model")
-            messagebox.showerror("Error", 
-                f"Failed to load medical model:\n{e}\n\n"
-                f"Make sure transformers is installed:\n"
-                f"pip install transformers"
-            )
-            self.medical_mode = False
-            self.medical_mode_btn.config(text="Medical Mode: OFF", bg="#9E9E9E", fg="white")
-            # Reload general model
-            if self.current_model_size:
-                self._load_model(self.current_model_size)
 
     def _is_hallucination(self, text):
         if not text:
@@ -617,15 +508,16 @@ class TranscriberGUI:
         tk.Button(control_frame, text="Clear", command=self._clear_text, width=8).pack(side=tk.LEFT, padx=2)
         tk.Button(control_frame, text="Copy", command=self._copy_text, width=8).pack(side=tk.LEFT, padx=2)
         
-        # Medical Mode Toggle Button
-        self.medical_mode_btn = tk.Button(
+        # Medical Vocabulary checkbox
+        self.medical_var = tk.BooleanVar(value=False)
+        self.medical_check = tk.Checkbutton(
             control_frame, 
-            text="Medical Mode: OFF",
-            command=self._toggle_medical_mode,
-            bg="#9E9E9E", fg="white", width=15,
-            font=("Helvetica", 9, "bold")
+            text="Use Medical Vocabulary",
+            variable=self.medical_var,
+            command=lambda: setattr(self, 'use_medical_vocab', self.medical_var.get()),
+            font=("Helvetica", 9)
         )
-        self.medical_mode_btn.pack(side=tk.LEFT, padx=5)
+        self.medical_check.pack(side=tk.LEFT, padx=5)
         
         self.status_label = tk.Label(control_frame, text="Initializing...", font=("Helvetica", 10))
         self.status_label.pack(side=tk.RIGHT, padx=5)
@@ -738,15 +630,10 @@ class TranscriberGUI:
         self._update_gui()
 
     def _toggle_recording(self):
-        # Check if either general model or medical model is loaded
-        if self.medical_mode:
-            if not self.medical_model_loaded or self.medical_model is None:
-                messagebox.showwarning("Warning", "Medical model still loading...")
-                return
-        else:
-            if self.model is None:
-                messagebox.showwarning("Warning", "Model still loading...")
-                return
+        # Check if model is loaded
+        if self.model is None:
+            messagebox.showwarning("Warning", "Model still loading...")
+            return
         
         if self.is_recording:
             self._stop_recording()
@@ -912,12 +799,8 @@ class TranscriberGUI:
             
             start_time = time.time()
             
-            if self.medical_mode and self.medical_model_loaded:
-                # Use Hugging Face medical model
-                full_text = self._transcribe_with_medical_model(audio)
-            else:
-                # Use faster-whisper general model
-                full_text = self._transcribe_with_general_model(audio)
+            # Always use faster-whisper general model
+            full_text = self._transcribe_with_general_model(audio)
             
             elapsed = time.time() - start_time
             audio_duration = len(audio) / self.sample_rate
@@ -929,10 +812,6 @@ class TranscriberGUI:
             ))
             
             cleaned_text = self._clean_transcription(full_text)
-            
-            # Apply medical vocabulary enhancement if in medical mode
-            if self.medical_mode and cleaned_text:
-                cleaned_text = self._enhance_medical_terms(cleaned_text)
             
             if self.filter_var.get() and self._is_hallucination(cleaned_text):
                 self.root.after(0, lambda: self.status_label.config(text="Listening..."))
@@ -948,7 +827,7 @@ class TranscriberGUI:
                     if len(self.all_transcriptions) > 10:
                         self.all_transcriptions = self.all_transcriptions[-10:]
                     self.text_queue.put(cleaned_text)
-                    mode_tag = "MEDICAL" if self.medical_mode else self.device.upper()
+                    mode_tag = "MED-VOCAB" if self.use_medical_vocab else self.device.upper()
                     print(f"[{mode_tag}] {cleaned_text}")
             
             self.root.after(0, lambda: self.status_label.config(text="Listening..."))
@@ -958,13 +837,25 @@ class TranscriberGUI:
             self.root.after(0, lambda: self.status_label.config(text="Error"))
     
     def _transcribe_with_general_model(self, audio):
-        """Transcribe using faster-whisper general model."""
+        """Transcribe using faster-whisper general model with optional medical vocabulary."""
         initial_prompt = None
+        
+        # Build context from previous transcriptions
         if self.all_transcriptions:
             context = " ".join(self.all_transcriptions[-3:])
             words = context.split()
             if len(words) > 5:
                 initial_prompt = " ".join(words[-30:])
+        
+        # Inject medical vocabulary into prompt if enabled
+        if self.use_medical_vocab and self.medical_vocabulary:
+            # Add a subset of medical terms to help recognition
+            vocab_sample = list(self.medical_vocabulary)[:25]
+            vocab_hint = ", ".join(vocab_sample)
+            if initial_prompt:
+                initial_prompt = f"Medical context: {vocab_hint}. {initial_prompt}"
+            else:
+                initial_prompt = f"Medical terms: {vocab_hint}"
         
         segments, info = self.model.transcribe(
             audio, language="en", beam_size=5, best_of=5, temperature=0.0,
@@ -978,121 +869,7 @@ class TranscriberGUI:
         
         return " ".join(text_parts).strip()
     
-    def _transcribe_with_medical_model(self, audio):
-        """Transcribe using Hugging Face medical model."""
-        import warnings
-        
-        # Build medical context prompt
-        initial_prompt = ""
-        if self.all_transcriptions:
-            context = " ".join(self.all_transcriptions[-3:])
-            words = context.split()
-            if len(words) > 5:
-                initial_prompt = " ".join(words[-30:])
-        
-        # Add medical vocabulary hints to prompt
-        if self.medical_vocabulary:
-            vocab_hint = ", ".join(list(self.medical_vocabulary)[:20])
-            initial_prompt = f"Medical terms: {vocab_hint}. {initial_prompt}" if initial_prompt else f"Medical terms: {vocab_hint}"
-        
-        try:
-            # Calculate audio duration
-            audio_duration = len(audio) / self.sample_rate
-            
-            # For short audio (<30s), don't use chunking
-            # For longer audio, use chunking despite the warning
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
-                
-                if audio_duration <= 30:
-                    # Short audio - no chunking needed
-                    result = self.medical_model(
-                        audio,
-                        return_timestamps=False,
-                        generate_kwargs={
-                            "task": "transcribe",
-                            "language": "en"
-                        }
-                    )
-                else:
-                    # Long audio - use chunking
-                    result = self.medical_model(
-                        audio,
-                        chunk_length_s=30,
-                        stride_length_s=5,
-                        return_timestamps=False,
-                        generate_kwargs={
-                            "task": "transcribe",
-                            "language": "en"
-                        }
-                    )
-            
-            return result["text"].strip() if result and "text" in result else ""
-            
-        except RuntimeError as e:
-            if "CUDA" in str(e):
-                print(f"CUDA error in medical transcription: {e}")
-                print("Trying to reload medical model on CPU...")
-                # Try to reload on CPU
-                self._load_medical_model_cpu_fallback()
-                # Retry transcription
-                return self._transcribe_with_medical_model(audio)
-            else:
-                raise
-    
-    def _load_medical_model_cpu_fallback(self):
-        """Reload medical model on CPU after CUDA error."""
-        try:
-            from transformers import pipeline
-            import torch
-            import warnings
-            
-            if self.medical_model is not None:
-                del self.medical_model
-                self.medical_model = None
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-            
-            print("Loading medical model on CPU (fallback)...")
-            
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message=".*chunk_length_s.*")
-                
-                self.medical_model = pipeline(
-                    "automatic-speech-recognition",
-                    model=self.MEDICAL_MODEL,
-                    device="cpu",
-                    torch_dtype=torch.float32,
-                    model_kwargs={"cache_dir": self.medical_model_path}
-                )
-            
-            self.medical_device = "cpu"
-            self.status_label.config(text="Ready (Medical Mode - CPU)")
-            print("Medical model reloaded on CPU")
-            
-        except Exception as e:
-            print(f"Failed to reload medical model on CPU: {e}")
-            raise
-    
-    def _enhance_medical_terms(self, text):
-        """Enhance medical terminology in transcribed text using vocabulary."""
-        if not text or not self.medical_vocabulary:
-            return text
-        
-        words = text.split()
-        enhanced_words = []
-        
-        for word in words:
-            word_lower = word.lower().strip('.,;:!?')
-            # Check if word matches known medical term
-            if word_lower in self.medical_vocabulary:
-                # Keep original capitalization from transcription
-                enhanced_words.append(word)
-            else:
-                # Check for close matches (simple Levenshtein-like check)
-                enhanced_words.append(word)
-        
-        return " ".join(enhanced_words)
+
 
     def _remove_overlap(self, previous, current):
         if not previous or not current:

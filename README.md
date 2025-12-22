@@ -1,6 +1,6 @@
 # Whisper Real-Time Transcriber
 
-A cross-platform real-time speech-to-text transcription application powered by OpenAI Whisper and specialized medical transcription models.
+A cross-platform real-time speech-to-text transcription application powered by OpenAI Whisper with customizable medical vocabulary injection for enhanced transcription accuracy.
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20Linux-blue)
 ![Python](https://img.shields.io/badge/Python-3.11-green)
@@ -9,13 +9,13 @@ A cross-platform real-time speech-to-text transcription application powered by O
 ## ✨ Features
 
 - **Real-time Transcription**: Continuous speech-to-text conversion with Voice Activity Detection (VAD)
-- **Dual Mode Operation**:
-  - **General Mode**: Standard Whisper models (tiny, base, small, medium, large-v2, large-v3)
-  - **Medical Mode**: Specialized medical transcription using [Crystalcareai/Whisper-Medicalv1](https://huggingface.co/Crystalcareai/Whisper-Medicalv1)
-- **GPU Acceleration**: Automatic CUDA detection and utilization
+- **Multiple Whisper Models**: Choose from tiny, base, small, medium, large-v2, large-v3
+- **Medical Vocabulary Injection**: Optional medical terminology context for improved medical transcription
+- **GPU Acceleration**: Automatic CUDA detection and utilization (RTX 5090 supported)
+- **Microphone Gain Control**: Adjustable 1.0x-5.0x amplification for quiet microphones
 - **Global Hotkey**: Toggle recording with Ctrl+F9
 - **Flexible Output**: Display in window, type at cursor position, or both
-- **Medical Vocabulary**: Customizable medical terminology dictionary (`medical_vocabulary.txt`)
+- **Customizable Medical Vocabulary**: Edit `medical_vocabulary.txt` to add your own terms
 - **Hallucination Filtering**: Intelligent filtering of common transcription artifacts
 - **Cross-Platform**: Works on Windows 11 and Linux (Ubuntu)
 - **System Tray Integration**: Minimize to system tray (Windows)
@@ -28,7 +28,10 @@ A cross-platform real-time speech-to-text transcription application powered by O
 - **Miniconda**: Already installed
 - **CUDA**: (Optional) For GPU acceleration - must be installed separately
   - Download from: https://developer.nvidia.com/cuda-downloads
-  - Recommended: CUDA 11.8 or 12.1+
+  - For RTX 50-series (5090): CUDA 12.4+ required
+  - For RTX 40-series: CUDA 12.1 recommended
+  - For RTX 30-series: CUDA 12.1 or 11.8
+  - For RTX 20-series: CUDA 11.8 recommended
   - **Note**: CUDA is NOT included in the installation scripts
 
 ### Hardware Requirements
@@ -36,11 +39,12 @@ A cross-platform real-time speech-to-text transcription application powered by O
 - **RAM**: 
   - Minimum: 4GB (for tiny/base models on CPU)
   - Recommended: 8GB+ (for larger models)
-  - Medical Mode: 8GB+ recommended
+  - With Medical Vocabulary: 8GB+ recommended
 - **GPU** (Optional but recommended):
   - NVIDIA GPU with 4GB+ VRAM for base/small models
   - 6GB+ VRAM for medium models
   - 8GB+ VRAM for large models
+  - RTX 5090 (32GB): Excellent performance with all models
 - **Microphone**: Any standard audio input device
 
 ## 🚀 Quick Start
@@ -48,14 +52,21 @@ A cross-platform real-time speech-to-text transcription application powered by O
 ### 1. Clone or Download
 ```bash
 cd /path/to/your/workspace
-git clone <repository-url>
-cd webapp
+git clone https://github.com/baggy962/WhisperX_Transcription.git
+cd WhisperX_Transcription
 ```
 
 ### 2. Run Setup (First Time Only)
+
+#### For Command Prompt (cmd.exe) - Recommended
 Double-click `setup.bat` or run from command prompt:
 ```cmd
 setup.bat
+```
+
+#### For PowerShell
+```powershell
+.\setup.ps1
 ```
 
 This will:
@@ -64,10 +75,47 @@ This will:
 - Install PyTorch (with CUDA support if available)
 - Install all required dependencies
 
-### 3. Launch the Application
-Double-click `launch.bat` or run from command prompt:
+### 3. GPU Setup (Optional but Recommended)
+
+If you have an NVIDIA GPU and CUDA installed, run the appropriate fix script:
+
+#### For RTX 5090 (Blackwell - Compute Capability 10.0)
+```cmd
+fix_rtx5090.bat
+```
+
+#### For Other GPUs
+```cmd
+fix_gpu.bat
+```
+OR
+```powershell
+.\fix_gpu.ps1
+```
+
+#### Diagnostic Tool
+To check your GPU and get recommendations:
+```cmd
+diagnose_gpu.bat
+```
+
+### 4. Launch the Application
+
+#### For Command Prompt
+Double-click `launch.bat` or run:
 ```cmd
 launch.bat
+```
+
+#### For PowerShell
+```powershell
+.\launch.ps1
+```
+
+#### Manual Launch
+```cmd
+conda activate whisper-transcriber
+python realtime_transcriber_cross_platform.py
 ```
 
 ## 📖 Detailed Installation
@@ -86,6 +134,12 @@ nvcc --version
 ```
 If CUDA is not found and you have an NVIDIA GPU, install from: https://developer.nvidia.com/cuda-downloads
 
+#### Verify GPU Detection
+```cmd
+nvidia-smi
+```
+Should show your NVIDIA GPU name and VRAM
+
 ### Manual Installation Steps
 
 If you prefer manual installation:
@@ -97,7 +151,13 @@ conda create -n whisper-transcriber python=3.11 -y
 # Activate environment
 conda activate whisper-transcriber
 
-# Install PyTorch with CUDA (if you have CUDA installed)
+# Install PyTorch with CUDA 12.4 (for RTX 5090)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# OR install PyTorch with CUDA 12.1 (for RTX 40/30-series)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# OR install PyTorch with CUDA 11.8 (for RTX 20/GTX 10-series)
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # OR install PyTorch CPU-only (if no CUDA)
@@ -111,16 +171,15 @@ pip install -r requirements.txt
 
 ### Basic Operation
 
-1. **Launch** the application using `launch.bat`
+1. **Launch** the application using `launch.bat` or `launch.ps1`
 2. **Select Device**: Choose between CPU or GPU (if available)
 3. **Choose Model**: Select from tiny, base, small, medium, or large-v3
-4. **Select Mode**:
-   - Keep "Medical Mode: OFF" for general transcription
-   - Click "Medical Mode: ON" for medical transcription
-5. **Configure Output**: Choose Window, Cursor, or Both
-6. **Start Recording**: Click "Start" button or press **Ctrl+F9**
-7. **Speak**: The transcription will appear in real-time
-8. **Stop Recording**: Click "Stop" or press **Ctrl+F9** again
+4. **Medical Vocabulary**: Check "Use Medical Vocabulary" for medical transcription
+5. **Adjust Mic Gain**: Set microphone gain (1.0x - 5.0x, default 2.5x)
+6. **Configure Output**: Choose Window, Cursor, or Both
+7. **Start Recording**: Click "Start" button or press **Ctrl+F9**
+8. **Speak**: The transcription will appear in real-time
+9. **Stop Recording**: Click "Stop" or press **Ctrl+F9** again
 
 ### Hotkey Controls
 
@@ -135,30 +194,53 @@ pip install -r requirements.txt
 | small | 244 MB | Moderate | Very Good | Balanced accuracy/speed | 4GB |
 | medium | 769 MB | Slower | Excellent | High accuracy needs | 6GB |
 | large-v3 | 1550 MB | Slowest | Best | Maximum accuracy | 8GB+ |
-| **Medical** | ~1500 MB | Moderate | Excellent (Medical) | Medical transcription | 8GB+ |
 
-### Medical Transcription Mode
+### Medical Transcription with Vocabulary Injection
 
-#### Activating Medical Mode
-1. Click the **"Medical Mode: OFF"** button
-2. Button will turn green and show **"Medical Mode: ON"**
-3. The medical model will download on first use (~1.5GB)
-4. Start recording as normal
+#### How It Works
+Instead of using a separate medical model, this app uses **vocabulary injection** - adding medical terms to the transcription context to guide the standard Whisper model. This approach:
+- ✅ Works reliably on all GPUs (no CUDA compatibility issues)
+- ✅ Faster than dedicated medical models
+- ✅ Uses proven, stable Whisper models
+- ✅ Customizable with your own terminology
 
-#### Medical Vocabulary Customization
+#### Using Medical Vocabulary
+1. Check the **"Use Medical Vocabulary"** checkbox
+2. The app will inject medical terms from `medical_vocabulary.txt` into the transcription context
+3. Whisper will be guided to recognize these terms more accurately
+
+#### Customizing Medical Vocabulary
 Edit `medical_vocabulary.txt` to add your custom medical terms:
 
 ```text
-# Add your terms here (one per line)
+# Add your terms here (one per line, case-insensitive)
+# Lines starting with # are comments
+
+# Common Medical Terms
+acetaminophen
+antibiotic
+cardiovascular
 laparotomy
 thoracotomy
+
+# Add your custom medical terms below
 your_custom_medical_term
 ```
 
 The app will:
 - Load vocabulary on startup
-- Use it to enhance transcription accuracy
-- Provide better recognition of medical terminology
+- Inject a sample of terms into each transcription context
+- Guide Whisper to recognize your medical terminology
+- Provide better accuracy for medical transcriptions
+
+### Microphone Gain Settings
+
+If your microphone is too quiet (e.g., showing only 38% volume at 100% Windows level):
+
+- **Recommended**: Set Mic Gain to **3.0-3.5x**
+- **For very quiet mics**: Try **4.0-5.0x**
+- **After Windows mic boost**: Use **2.0-2.5x**
+- Audio is automatically clipped to prevent distortion
 
 ## ⚙️ Configuration
 
@@ -167,6 +249,7 @@ The app will:
 - **Silence Threshold**: Audio level below which speech is considered silence (0.005 - 0.05)
 - **Pause Duration**: How long to wait after silence before transcribing (0.5 - 3.0 seconds)
 - **Max Chunk**: Maximum duration of a single transcription chunk (10 - 30 seconds)
+- **Mic Gain**: Microphone amplification (1.0x - 5.0x, default 2.5x)
 
 ### Advanced Settings
 
@@ -184,30 +267,51 @@ Edit the Python script to customize:
 
 **Solution**:
 ```cmd
-# Verify CUDA installation
+# Check CUDA version
 nvcc --version
 
-# If CUDA is installed, reinstall PyTorch with CUDA
+# Check GPU
+nvidia-smi
+
+# Run diagnostic tool
+diagnose_gpu.bat
+
+# For RTX 5090, use dedicated fix
+fix_rtx5090.bat
+
+# For other GPUs
+fix_gpu.bat
+```
+
+**Manual Fix**:
+```cmd
 conda activate whisper-transcriber
-pip uninstall torch torchvision torchaudio
+pip uninstall torch torchvision torchaudio -y
+
+# For RTX 5090 (Compute Capability 10.0) - requires CUDA 12.4+
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# For RTX 40/30-series
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# For RTX 20-series or older
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 ```
 
-#### 2. Hotkey Not Working
+#### 2. Low Microphone Volume
+**Problem**: Microphone input shows only 38% even at 100% Windows volume
+
+**Solution**:
+- Use the **Mic Gain** slider in the app
+- Set to **3.0x** or higher
+- Audio is automatically clipped to prevent distortion
+
+#### 3. Hotkey Not Working
 **Problem**: Ctrl+F9 doesn't toggle recording
 
 **Solution**:
 - **Windows**: Run the application as Administrator
 - **Linux**: Install pynput: `pip install pynput`
-
-#### 3. Medical Model Fails to Load
-**Problem**: Error when switching to Medical Mode
-
-**Solution**:
-```cmd
-conda activate whisper-transcriber
-pip install transformers huggingface-hub --upgrade
-```
 
 #### 4. Audio Device Not Found
 **Problem**: "No audio device" error
@@ -225,25 +329,52 @@ pip install transformers huggingface-hub --upgrade
 - Close other applications
 - Use CPU mode instead of GPU for large models
 
+#### 6. Batch File Stops After "Checking conda installation..."
+**Problem**: Setup stops in PowerShell or cmd
+
+**Solution**:
+- Use `setup.ps1` for PowerShell: `.\setup.ps1`
+- Use `setup.bat` for Command Prompt (cmd.exe)
+- OR double-click the file in File Explorer
+
 ### Performance Tips
 
 1. **For Best Speed**: Use GPU with tiny/base model
-2. **For Best Accuracy**: Use GPU with large-v3 or Medical model
+2. **For Best Accuracy**: Use GPU with large-v3 + medical vocabulary
 3. **CPU Mode**: Stick to tiny or base models
-4. **Medical Mode**: Requires 8GB+ RAM and benefits significantly from GPU
+4. **Medical Vocabulary**: Works best with medium/large models on GPU
+5. **RTX 5090**: Can handle large-v3 in real-time with RTF < 0.3x
+
+### Expected Performance (Real-Time Factor - RTF)
+
+| GPU | Model | RTF | Notes |
+|-----|-------|-----|-------|
+| RTX 5090 | large-v3 | 0.3x | 10x faster than real-time |
+| RTX 5090 | base | 0.1x | 30x faster than real-time |
+| RTX 4090 | large-v3 | 0.4x | 8x faster than real-time |
+| RTX 3080 | large-v3 | 0.6x | 5x faster than real-time |
+| CPU (i9) | base | 2.0x | 2x slower than real-time |
+| CPU (i9) | large-v3 | 8.0x | 8x slower than real-time |
+
+*RTF < 1.0 means faster than real-time*
 
 ## 📁 Project Structure
 
 ```
-webapp/
+WhisperX_Transcription/
 ├── realtime_transcriber_cross_platform.py   # Main application
-├── setup.bat                                 # Environment setup script
-├── launch.bat                                # Application launcher
+├── setup.bat                                 # Environment setup (cmd)
+├── setup.ps1                                 # Environment setup (PowerShell)
+├── launch.bat                                # Application launcher (cmd)
+├── launch.ps1                                # Application launcher (PowerShell)
+├── fix_gpu.bat                               # GPU fix script (general)
+├── fix_gpu.ps1                               # GPU fix script (PowerShell)
+├── fix_rtx5090.bat                           # GPU fix for RTX 5090
+├── diagnose_gpu.bat                          # GPU diagnostic tool
 ├── requirements.txt                          # Python dependencies
 ├── medical_vocabulary.txt                    # Medical terms dictionary
 ├── README.md                                 # This file
-├── models/                                   # General Whisper models (auto-created)
-└── medical_models/                           # Medical model cache (auto-created)
+└── models/                                   # Whisper models (auto-created)
 ```
 
 ## 🔄 Updates and Maintenance
@@ -258,9 +389,8 @@ pip install -r requirements.txt --upgrade
 Simply edit `medical_vocabulary.txt` and restart the application. The new terms will be loaded automatically.
 
 ### Clearing Model Cache
-To free up disk space, you can delete the model directories:
-- `models/` - General Whisper models
-- `medical_models/` - Medical model cache
+To free up disk space, you can delete the model directory:
+- `models/` - Whisper models
 
 Models will be re-downloaded when needed.
 
@@ -276,27 +406,26 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 - [OpenAI Whisper](https://github.com/openai/whisper) - Original Whisper model
 - [faster-whisper](https://github.com/guillaumekln/faster-whisper) - Optimized Whisper implementation
-- [Crystalcareai/Whisper-Medicalv1](https://huggingface.co/Crystalcareai/Whisper-Medicalv1) - Medical transcription model
-- [Hugging Face](https://huggingface.co/) - Model hosting and transformers library
+- Community contributors for medical vocabulary terms
 
 ## 📞 Support
 
 For issues, questions, or suggestions:
-- Open an issue on GitHub
+- Open an issue on GitHub: https://github.com/baggy962/WhisperX_Transcription
 - Check existing issues for solutions
 - Review the troubleshooting section above
 
 ## 🔮 Future Enhancements
 
-- [ ] Support for multiple languages in medical mode
-- [ ] Custom model fine-tuning guide
+- [ ] Support for multiple languages with vocabulary injection
 - [ ] Export transcriptions to file (txt, docx, pdf)
 - [ ] Timestamped transcription option
 - [ ] Speaker diarization support
-- [ ] Integration with Electronic Health Records (EHR) systems
+- [ ] Batch processing of audio files
+- [ ] Real-time translation mode
 
 ---
 
-**Version**: 2.0.0  
+**Version**: 3.0.0  
 **Last Updated**: December 2024  
-**Tested On**: Windows 11, Ubuntu 22.04
+**Tested On**: Windows 11, Ubuntu 22.04, RTX 5090

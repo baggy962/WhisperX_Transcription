@@ -8,10 +8,6 @@ sounddevice>=0.4.6
 # Whisper Models
 faster-whisper>=1.0.0
 torch>=2.0.0
-transformers>=4.35.0
-
-# Hugging Face Medical Model Support
-huggingface-hub>=0.19.0
 
 # GUI
 # tkinter is included with Python standard library
@@ -31,5 +27,9 @@ pynput>=1.7.6; sys_platform != 'win32'
 
 # Note: If you have CUDA installed, use:
 # pip uninstall torch
+# For RTX 5090 (Compute Capability 10.0): Use CUDA 12.4
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# For RTX 40/30-series: Use CUDA 12.1
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+# For RTX 20-series or older: Use CUDA 11.8
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# (or cu121 for CUDA 12.1, cu124 for CUDA 12.4)

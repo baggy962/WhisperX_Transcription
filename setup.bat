@@ -139,10 +139,10 @@ echo 2. Running the Application:
 echo    - Use launch.bat to start the transcriber
 echo    - Or manually: conda activate %ENV_NAME% ^&^& python realtime_transcriber_cross_platform.py
 echo.
-echo 3. Medical Transcription:
-echo    - The app includes Crystalcareai/Whisper-Medicalv1 model support
-echo    - Medical model will be downloaded on first use
+echo 3. Medical Vocabulary:
+echo    - Enable "Use Medical Vocabulary" checkbox for medical transcription
 echo    - Edit medical_vocabulary.txt to add custom medical terms
+echo    - Medical terms are injected into Whisper's context for better accuracy
 echo.
 echo 4. Hotkey: Ctrl+F9 to toggle recording
 echo.
