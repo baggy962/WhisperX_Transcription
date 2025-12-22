@@ -462,14 +462,26 @@ class TranscriberGUI:
             self._stop_recording()
         
         if self.medical_mode:
-            # Load medical model
+            # Switch to medical mode
             self.status_label.config(text="Loading medical model...")
             self.root.update()
             self._load_medical_model()
             self.medical_mode_btn.config(text="Medical Mode: ON", bg="#4CAF50", fg="white")
         else:
+            # Switch back to general mode
+            # Clear medical model
+            if self.medical_model is not None:
+                del self.medical_model
+                self.medical_model = None
+                self.medical_model_loaded = False
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
             # Reload general model
             if self.current_model_size:
+                self.status_label.config(text=f"Loading {self.current_model_size}...")
+                self.root.update()
                 self._load_model(self.current_model_size)
             self.medical_mode_btn.config(text="Medical Mode: OFF", bg="#9E9E9E", fg="white")
         
@@ -701,9 +713,16 @@ class TranscriberGUI:
         self._update_gui()
 
     def _toggle_recording(self):
-        if self.model is None:
-            messagebox.showwarning("Warning", "Model still loading...")
-            return
+        # Check if either general model or medical model is loaded
+        if self.medical_mode:
+            if not self.medical_model_loaded or self.medical_model is None:
+                messagebox.showwarning("Warning", "Medical model still loading...")
+                return
+        else:
+            if self.model is None:
+                messagebox.showwarning("Warning", "Model still loading...")
+                return
+        
         if self.is_recording:
             self._stop_recording()
         else:
