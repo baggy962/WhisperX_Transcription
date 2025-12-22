@@ -1,0 +1,35 @@
+# Core Dependencies for Whisper Real-Time Transcriber
+# Python 3.11 recommended
+
+# Audio Processing
+numpy>=1.24.0,<2.0.0
+sounddevice>=0.4.6
+
+# Whisper Models
+faster-whisper>=1.0.0
+torch>=2.0.0
+transformers>=4.35.0
+
+# Hugging Face Medical Model Support
+huggingface-hub>=0.19.0
+
+# GUI
+# tkinter is included with Python standard library
+
+# Windows-specific (will be skipped on Linux)
+keyboard>=0.13.5; sys_platform == 'win32'
+pyperclip>=1.8.2
+pystray>=0.19.5; sys_platform == 'win32'
+Pillow>=10.0.0; sys_platform == 'win32'
+
+# Linux-specific alternative
+pynput>=1.7.6; sys_platform != 'win32'
+
+# Optional but recommended for better performance
+# CUDA support - Install PyTorch with CUDA separately:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Note: If you have CUDA installed, use:
+# pip uninstall torch
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# (or cu121 for CUDA 12.1, cu124 for CUDA 12.4)

@@ -1,0 +1,249 @@
+# Medical Vocabulary File for Whisper Medical Transcription
+# Add medical terms one per line (case-insensitive)
+# Lines starting with # are comments
+# This file is used to enhance medical transcription accuracy
+
+# ============================================================================
+# Common Medical Terms
+# ============================================================================
+acetaminophen
+antibiotic
+cardiovascular
+diabetes
+hypertension
+prescription
+diagnosis
+prognosis
+symptomatic
+asymptomatic
+chronic
+acute
+benign
+malignant
+carcinoma
+metastasis
+
+# ============================================================================
+# Anatomical Terms
+# ============================================================================
+abdomen
+thorax
+cranium
+femur
+tibia
+fibula
+humerus
+radius
+ulna
+vertebrae
+cervical
+lumbar
+thoracic
+sacral
+coccyx
+epidermis
+dermis
+subcutaneous
+myocardium
+endocardium
+pericardium
+
+# ============================================================================
+# Medical Procedures
+# ============================================================================
+biopsy
+endoscopy
+colonoscopy
+bronchoscopy
+laparoscopy
+angiography
+angioplasty
+catheterization
+intubation
+tracheostomy
+thoracentesis
+paracentesis
+lumbar puncture
+appendectomy
+cholecystectomy
+hysterectomy
+mastectomy
+nephrectomy
+
+# ============================================================================
+# Medications
+# ============================================================================
+ibuprofen
+naproxen
+aspirin
+acetaminophen
+metformin
+insulin
+lisinopril
+amlodipine
+atorvastatin
+simvastatin
+levothyroxine
+omeprazole
+pantoprazole
+albuterol
+metoprolol
+warfarin
+heparin
+penicillin
+amoxicillin
+azithromycin
+ciprofloxacin
+prednisone
+dexamethasone
+
+# ============================================================================
+# Medical Conditions
+# ============================================================================
+hypertension
+hypotension
+tachycardia
+bradycardia
+arrhythmia
+fibrillation
+myocardial infarction
+angina
+atherosclerosis
+thrombosis
+embolism
+aneurysm
+pneumonia
+bronchitis
+emphysema
+asthma
+tuberculosis
+influenza
+gastritis
+colitis
+pancreatitis
+hepatitis
+cirrhosis
+nephritis
+pyelonephritis
+cystitis
+arthritis
+osteoarthritis
+rheumatoid arthritis
+osteoporosis
+fracture
+dislocation
+sprain
+contusion
+laceration
+abrasion
+hematoma
+edema
+ischemia
+necrosis
+sepsis
+septicemia
+meningitis
+encephalitis
+neuropathy
+myopathy
+
+# ============================================================================
+# Diagnostic Terms
+# ============================================================================
+radiograph
+ultrasound
+computed tomography
+magnetic resonance imaging
+electrocardiogram
+echocardiogram
+electroencephalogram
+positron emission tomography
+mammography
+fluoroscopy
+biopsy
+pathology
+histology
+cytology
+serology
+hematology
+
+# ============================================================================
+# Laboratory Values
+# ============================================================================
+hemoglobin
+hematocrit
+leukocyte
+erythrocyte
+platelet
+glucose
+creatinine
+urea
+electrolyte
+sodium
+potassium
+calcium
+magnesium
+phosphate
+albumin
+bilirubin
+alkaline phosphatase
+transaminase
+
+# ============================================================================
+# Medical Abbreviations (spelled out)
+# ============================================================================
+blood pressure
+heart rate
+respiratory rate
+temperature
+oxygen saturation
+body mass index
+complete blood count
+basic metabolic panel
+comprehensive metabolic panel
+urinalysis
+chest x-ray
+electrocardiogram
+magnetic resonance imaging
+computed tomography
+
+# ============================================================================
+# Symptoms
+# ============================================================================
+dyspnea
+orthopnea
+tachypnea
+bradypnea
+hemoptysis
+epistaxis
+hematemesis
+melena
+hematochezia
+dysuria
+polyuria
+oliguria
+anuria
+polydipsia
+polyphagia
+nausea
+emesis
+diarrhea
+constipation
+abdominal pain
+chest pain
+headache
+dizziness
+syncope
+vertigo
+paresthesia
+weakness
+fatigue
+malaise
+fever
+chills
+diaphoresis
+
+# ============================================================================
+# Add Your Custom Medical Terms Below
+# ============================================================================
+# (Add terms specific to your medical specialty or practice)

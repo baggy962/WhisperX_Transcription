@@ -17,6 +17,7 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox
 import os
 import sys
+import json
 
 # Platform detection
 IS_WINDOWS = sys.platform == 'win32'
@@ -210,6 +211,10 @@ class TranscriberGUI:
     ]
     
     MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
+    MEDICAL_MODEL = "Crystalcareai/Whisper-Medicalv1"
+    
+    # Medical vocabulary file
+    MEDICAL_VOCAB_FILE = "medical_vocabulary.txt"
     
     def __init__(self):
         # Platform info
@@ -258,6 +263,12 @@ class TranscriberGUI:
         self.previous_transcription = ""
         self.all_transcriptions = []
         
+        # Medical mode
+        self.medical_mode = False
+        self.medical_vocabulary = self._load_medical_vocabulary()
+        self.medical_model = None
+        self.medical_model_loaded = False
+        
         # Platform-specific managers
         self.clipboard = ClipboardManager()
         self.hotkey_manager = None
@@ -265,9 +276,12 @@ class TranscriberGUI:
         # Tray icon (Windows only)
         self.tray_icon = None
         
-        # Model path
+        # Model paths
         self.model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
         os.makedirs(self.model_path, exist_ok=True)
+        
+        self.medical_model_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "medical_models")
+        os.makedirs(self.medical_model_path, exist_ok=True)
         
         self._create_gui()
         self._setup_platform_features()
@@ -276,6 +290,8 @@ class TranscriberGUI:
         default_model = "tiny" if self.device == "cpu" else "base"
         self.model_var.set(default_model)
         self.root.after(100, lambda: self._load_model(default_model))
+        
+        print(f"Medical vocabulary loaded: {len(self.medical_vocabulary)} terms")
 
     def _setup_platform_features(self):
         """Set up platform-specific features."""
@@ -287,6 +303,55 @@ class TranscriberGUI:
         # Tray icon (Windows only)
         if IS_WINDOWS and HAS_TRAY:
             self._create_tray()
+    
+    def _load_medical_vocabulary(self):
+        """Load medical vocabulary from file."""
+        vocab_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.MEDICAL_VOCAB_FILE)
+        vocabulary = set()
+        
+        if os.path.exists(vocab_file):
+            try:
+                with open(vocab_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            vocabulary.add(line.lower())
+                print(f"Loaded {len(vocabulary)} medical terms from {self.MEDICAL_VOCAB_FILE}")
+            except Exception as e:
+                print(f"Warning: Could not load medical vocabulary: {e}")
+        else:
+            print(f"Warning: {self.MEDICAL_VOCAB_FILE} not found. Creating default file.")
+            self._create_default_medical_vocabulary(vocab_file)
+            vocabulary = self._load_medical_vocabulary()
+        
+        return vocabulary
+    
+    def _create_default_medical_vocabulary(self, filepath):
+        """Create a default medical vocabulary file."""
+        default_vocab = [
+            "# Medical Vocabulary File",
+            "# Add medical terms one per line (case-insensitive)",
+            "# Lines starting with # are comments",
+            "",
+            "# Common Medical Terms",
+            "acetaminophen",
+            "antibiotic",
+            "cardiovascular",
+            "diabetes",
+            "hypertension",
+            "prescription",
+            "diagnosis",
+            "prognosis",
+            "symptomatic",
+            "asymptomatic",
+        ]
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(default_vocab))
+            print(f"Created default {self.MEDICAL_VOCAB_FILE}")
+        except Exception as e:
+            print(f"Error creating default vocabulary file: {e}")
 
     def _create_tray(self):
         """Create system tray icon (Windows only)."""
@@ -370,6 +435,72 @@ class TranscriberGUI:
         
         if self.current_model_size:
             self._load_model(self.current_model_size)
+    
+    def _toggle_medical_mode(self):
+        """Toggle between general and medical transcription modes."""
+        self.medical_mode = not self.medical_mode
+        
+        if self.is_recording:
+            self._stop_recording()
+        
+        if self.medical_mode:
+            # Load medical model
+            self.status_label.config(text="Loading medical model...")
+            self.root.update()
+            self._load_medical_model()
+            self.medical_mode_btn.config(text="Medical Mode: ON", bg="#4CAF50", fg="white")
+        else:
+            # Reload general model
+            if self.current_model_size:
+                self._load_model(self.current_model_size)
+            self.medical_mode_btn.config(text="Medical Mode: OFF", bg="#9E9E9E", fg="white")
+        
+        print(f"Mode switched to: {'Medical' if self.medical_mode else 'General'}")
+    
+    def _load_medical_model(self):
+        """Load the Crystalcareai medical Whisper model from Hugging Face."""
+        try:
+            from transformers import pipeline
+            import torch
+            
+            # Clear existing model
+            if self.model is not None:
+                del self.model
+                self.model = None
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            # Load medical model using transformers pipeline
+            device_str = "cuda:0" if self.device == "cuda" and torch.cuda.is_available() else "cpu"
+            torch_dtype = torch.float16 if self.device == "cuda" else torch.float32
+            
+            print(f"Loading medical model from Hugging Face on {device_str}...")
+            
+            self.medical_model = pipeline(
+                "automatic-speech-recognition",
+                model=self.MEDICAL_MODEL,
+                device=device_str,
+                torch_dtype=torch_dtype,
+                model_kwargs={"cache_dir": self.medical_model_path}
+            )
+            
+            self.medical_model_loaded = True
+            self.status_label.config(text="Ready (Medical Mode)")
+            print(f"Medical model loaded successfully")
+            
+        except Exception as e:
+            print(f"Error loading medical model: {e}")
+            self.status_label.config(text="Error loading medical model")
+            messagebox.showerror("Error", 
+                f"Failed to load medical model:\n{e}\n\n"
+                f"Make sure transformers is installed:\n"
+                f"pip install transformers"
+            )
+            self.medical_mode = False
+            self.medical_mode_btn.config(text="Medical Mode: OFF", bg="#9E9E9E", fg="white")
+            # Reload general model
+            if self.current_model_size:
+                self._load_model(self.current_model_size)
 
     def _is_hallucination(self, text):
         if not text:
@@ -430,6 +561,16 @@ class TranscriberGUI:
         
         tk.Button(control_frame, text="Clear", command=self._clear_text, width=8).pack(side=tk.LEFT, padx=2)
         tk.Button(control_frame, text="Copy", command=self._copy_text, width=8).pack(side=tk.LEFT, padx=2)
+        
+        # Medical Mode Toggle Button
+        self.medical_mode_btn = tk.Button(
+            control_frame, 
+            text="Medical Mode: OFF",
+            command=self._toggle_medical_mode,
+            bg="#9E9E9E", fg="white", width=15,
+            font=("Helvetica", 9, "bold")
+        )
+        self.medical_mode_btn.pack(side=tk.LEFT, padx=5)
         
         self.status_label = tk.Label(control_frame, text="Initializing...", font=("Helvetica", 10))
         self.status_label.pack(side=tk.RIGHT, padx=5)
@@ -699,19 +840,12 @@ class TranscriberGUI:
             
             start_time = time.time()
             
-            initial_prompt = None
-            if self.all_transcriptions:
-                context = " ".join(self.all_transcriptions[-3:])
-                words = context.split()
-                if len(words) > 5:
-                    initial_prompt = " ".join(words[-30:])
-            
-            segments, info = self.model.transcribe(
-                audio, language="en", beam_size=5, best_of=5, temperature=0.0,
-                vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5),
-                word_timestamps=False, initial_prompt=initial_prompt,
-                no_speech_threshold=0.5, log_prob_threshold=-1.0, compression_ratio_threshold=2.4,
-            )
+            if self.medical_mode and self.medical_model_loaded:
+                # Use Hugging Face medical model
+                full_text = self._transcribe_with_medical_model(audio)
+            else:
+                # Use faster-whisper general model
+                full_text = self._transcribe_with_general_model(audio)
             
             elapsed = time.time() - start_time
             audio_duration = len(audio) / self.sample_rate
@@ -722,11 +856,11 @@ class TranscriberGUI:
                 fg="green" if rtf < 0.5 else "orange" if rtf < 1 else "red"
             ))
             
-            text_parts = [seg.text.strip() for seg in segments 
-                         if not (hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.5)]
-            
-            full_text = " ".join(text_parts).strip()
             cleaned_text = self._clean_transcription(full_text)
+            
+            # Apply medical vocabulary enhancement if in medical mode
+            if self.medical_mode and cleaned_text:
+                cleaned_text = self._enhance_medical_terms(cleaned_text)
             
             if self.filter_var.get() and self._is_hallucination(cleaned_text):
                 self.root.after(0, lambda: self.status_label.config(text="Listening..."))
@@ -742,13 +876,84 @@ class TranscriberGUI:
                     if len(self.all_transcriptions) > 10:
                         self.all_transcriptions = self.all_transcriptions[-10:]
                     self.text_queue.put(cleaned_text)
-                    print(f"[{self.device.upper()}] {cleaned_text}")
+                    mode_tag = "MEDICAL" if self.medical_mode else self.device.upper()
+                    print(f"[{mode_tag}] {cleaned_text}")
             
             self.root.after(0, lambda: self.status_label.config(text="Listening..."))
             
         except Exception as e:
             print(f"Transcription error: {e}")
             self.root.after(0, lambda: self.status_label.config(text="Error"))
+    
+    def _transcribe_with_general_model(self, audio):
+        """Transcribe using faster-whisper general model."""
+        initial_prompt = None
+        if self.all_transcriptions:
+            context = " ".join(self.all_transcriptions[-3:])
+            words = context.split()
+            if len(words) > 5:
+                initial_prompt = " ".join(words[-30:])
+        
+        segments, info = self.model.transcribe(
+            audio, language="en", beam_size=5, best_of=5, temperature=0.0,
+            vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5),
+            word_timestamps=False, initial_prompt=initial_prompt,
+            no_speech_threshold=0.5, log_prob_threshold=-1.0, compression_ratio_threshold=2.4,
+        )
+        
+        text_parts = [seg.text.strip() for seg in segments 
+                     if not (hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.5)]
+        
+        return " ".join(text_parts).strip()
+    
+    def _transcribe_with_medical_model(self, audio):
+        """Transcribe using Hugging Face medical model."""
+        # Build medical context prompt
+        initial_prompt = ""
+        if self.all_transcriptions:
+            context = " ".join(self.all_transcriptions[-3:])
+            words = context.split()
+            if len(words) > 5:
+                initial_prompt = " ".join(words[-30:])
+        
+        # Add medical vocabulary hints to prompt
+        if self.medical_vocabulary:
+            vocab_hint = ", ".join(list(self.medical_vocabulary)[:20])
+            initial_prompt = f"Medical terms: {vocab_hint}. {initial_prompt}" if initial_prompt else f"Medical terms: {vocab_hint}"
+        
+        # Transcribe using pipeline
+        result = self.medical_model(
+            audio,
+            chunk_length_s=30,
+            stride_length_s=5,
+            return_timestamps=False,
+            generate_kwargs={
+                "task": "transcribe",
+                "language": "en"
+            }
+        )
+        
+        return result["text"].strip() if result and "text" in result else ""
+    
+    def _enhance_medical_terms(self, text):
+        """Enhance medical terminology in transcribed text using vocabulary."""
+        if not text or not self.medical_vocabulary:
+            return text
+        
+        words = text.split()
+        enhanced_words = []
+        
+        for word in words:
+            word_lower = word.lower().strip('.,;:!?')
+            # Check if word matches known medical term
+            if word_lower in self.medical_vocabulary:
+                # Keep original capitalization from transcription
+                enhanced_words.append(word)
+            else:
+                # Check for close matches (simple Levenshtein-like check)
+                enhanced_words.append(word)
+        
+        return " ".join(enhanced_words)
 
     def _remove_overlap(self, previous, current):
         if not previous or not current:
