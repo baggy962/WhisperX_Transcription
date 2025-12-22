@@ -54,16 +54,33 @@ def get_device_info():
     
     try:
         import torch
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        
         if torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             vram = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            cuda_version = torch.version.cuda
+            print(f"CUDA version: {cuda_version}")
+            print(f"GPU: {gpu_name}")
+            print(f"VRAM: {vram:.1f}GB")
             devices["cuda"] = {
                 "available": True,
                 "name": f"{gpu_name} ({vram:.1f}GB)",
                 "compute_type": "float16"
             }
-    except:
-        pass
+        else:
+            print("GPU not detected. Reasons could be:")
+            print("  - PyTorch CPU-only version installed")
+            print("  - CUDA not installed or not in PATH")
+            print("  - No NVIDIA GPU in system")
+            print("  - GPU drivers not installed")
+            if hasattr(torch.version, 'cuda') and torch.version.cuda is None:
+                print("  -> PyTorch was compiled without CUDA support")
+                print("  -> To fix: pip uninstall torch")
+                print("  -> Then: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118")
+    except Exception as e:
+        print(f"Error detecting GPU: {e}")
     
     return devices
 
@@ -235,6 +252,7 @@ class TranscriberGUI:
         
         # Audio settings
         self.sample_rate = 16000
+        self.microphone_gain = 2.5  # Default gain multiplier (1.0 = no gain, 2.5 = 2.5x amplification)
         
         # Detection settings
         self.silence_threshold = 0.015
@@ -645,6 +663,12 @@ class TranscriberGUI:
                 variable=self.max_chunk_var, length=70,
                 command=lambda v: setattr(self, 'max_audio_duration', float(v))).pack(side=tk.LEFT)
         
+        tk.Label(settings_frame, text="Mic Gain:").pack(side=tk.LEFT, padx=(5, 0))
+        self.gain_var = tk.DoubleVar(value=2.5)
+        tk.Scale(settings_frame, from_=1.0, to=5.0, resolution=0.1, orient=tk.HORIZONTAL,
+                variable=self.gain_var, length=70,
+                command=lambda v: setattr(self, 'microphone_gain', float(v))).pack(side=tk.LEFT)
+        
         self.filter_var = tk.BooleanVar(value=True)
         tk.Checkbutton(settings_frame, text="Filter hallucinations", variable=self.filter_var).pack(side=tk.LEFT, padx=10)
         
@@ -744,7 +768,11 @@ class TranscriberGUI:
 
     def _audio_callback(self, indata, frames, time_info, status):
         if self.is_recording:
-            self.audio_queue.put(indata.copy().flatten())
+            # Apply microphone gain
+            gained_audio = indata.copy().flatten() * self.microphone_gain
+            # Clip to prevent distortion
+            gained_audio = np.clip(gained_audio, -1.0, 1.0)
+            self.audio_queue.put(gained_audio)
 
     def _process_loop(self):
         while self.is_recording:
