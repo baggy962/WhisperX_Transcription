@@ -14,10 +14,12 @@ import sounddevice as sd
 import time
 import re
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from tkinter import scrolledtext, messagebox, ttk
 import os
 import sys
 import json
+import requests
+from collections import deque
 
 # Platform detection
 IS_WINDOWS = sys.platform == 'win32'
@@ -217,6 +219,129 @@ class ClipboardManager:
                 print(f"Error typing text: {e}")
 
 
+class OllamaClient:
+    """Client for Ollama LLM API."""
+    
+    def __init__(self, server_url="http://192.168.50.134:11434", model="llama3.2:3b"):
+        self.server_url = server_url.rstrip('/')
+        self.model = model
+        self.timeout = 10.0
+    
+    def test_connection(self):
+        """Test if Ollama server is accessible."""
+        try:
+            response = requests.get(f"{self.server_url}/api/tags", timeout=2.0)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def get_available_models(self):
+        """Get list of available models from Ollama server."""
+        try:
+            response = requests.get(f"{self.server_url}/api/tags", timeout=2.0)
+            if response.status_code == 200:
+                data = response.json()
+                return [model['name'] for model in data.get('models', [])]
+            return []
+        except Exception as e:
+            print(f"Error fetching models: {e}")
+            return []
+    
+    def correct_text(self, chunks, pause_duration=0.0):
+        """Send chunks to LLM for correction."""
+        try:
+            # Build prompt
+            chunks_text = "\n".join(f"{i+1}: {chunk}" for i, chunk in enumerate(chunks))
+            
+            prompt = f"""Fix any sentence fragments or punctuation errors in these transcribed text segments.
+Preserve the original wording as much as possible.
+Only merge fragments if they clearly belong together.
+If pause was long (>5 seconds), treat as separate paragraphs.
+
+Segments (in order):
+{chunks_text}
+
+Pause after last segment: {pause_duration:.1f} seconds
+
+Output only the corrected text with no explanations or comments:"""
+            
+            # Call Ollama API
+            response = requests.post(
+                f"{self.server_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9,
+                    }
+                },
+                timeout=self.timeout
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                corrected = result.get('response', '').strip()
+                return corrected if corrected else " ".join(chunks)
+            else:
+                print(f"LLM API error: {response.status_code}")
+                return " ".join(chunks)
+                
+        except Exception as e:
+            print(f"LLM correction error: {e}")
+            # Fallback: just join the chunks
+            return " ".join(chunks)
+
+
+class TranscriptionBuffer:
+    """Buffer for holding transcription chunks before LLM processing."""
+    
+    def __init__(self, max_size=5, pause_threshold=3.0):
+        self.chunks = deque(maxlen=max_size)
+        self.timestamps = deque(maxlen=max_size)
+        self.pause_threshold = pause_threshold
+        self.last_output_time = None
+    
+    def add_chunk(self, text, timestamp=None):
+        """Add a chunk to the buffer."""
+        if timestamp is None:
+            timestamp = time.time()
+        self.chunks.append(text)
+        self.timestamps.append(timestamp)
+    
+    def should_process(self):
+        """Check if buffer should be processed (user paused)."""
+        if len(self.chunks) == 0:
+            return False
+        
+        time_since_last = time.time() - self.timestamps[-1]
+        return time_since_last >= self.pause_threshold
+    
+    def get_chunks(self):
+        """Get all chunks in buffer."""
+        return list(self.chunks)
+    
+    def get_pause_duration(self):
+        """Get duration since last chunk."""
+        if len(self.timestamps) == 0:
+            return 0.0
+        return time.time() - self.timestamps[-1]
+    
+    def clear(self):
+        """Clear the buffer."""
+        self.chunks.clear()
+        self.timestamps.clear()
+    
+    def size(self):
+        """Get number of chunks in buffer."""
+        return len(self.chunks)
+    
+    def is_empty(self):
+        """Check if buffer is empty."""
+        return len(self.chunks) == 0
+
+
 class TranscriberGUI:
     
     HALLUCINATIONS = [
@@ -286,10 +411,20 @@ class TranscriberGUI:
         # Context
         self.previous_transcription = ""
         self.all_transcriptions = []
+        self.last_output_time = None  # Track last output for single-word filtering
         
         # Medical vocabulary for context injection
         self.use_medical_vocab = False
         self.medical_vocabulary = self._load_medical_vocabulary()
+        
+        # LLM correction system
+        self.use_llm_correction = False
+        self.llm_server = "http://192.168.50.134:11434"
+        self.llm_model = "llama3.2:3b"
+        self.llm_client = None
+        self.transcription_buffer = TranscriptionBuffer(max_size=5, pause_threshold=3.0)
+        self.llm_processing = False
+        self.last_chunk_time = time.time()
         
         # Platform-specific managers
         self.clipboard = ClipboardManager()
@@ -315,13 +450,139 @@ class TranscriberGUI:
     def _setup_platform_features(self):
         """Set up platform-specific features."""
         
-        # Hotkey
+        # Hotkey for recording
         self.hotkey_manager = HotkeyManager(lambda: self.root.after(0, self._toggle_recording))
         self.hotkey_manager.register()
+        
+        # Hotkey for buffer flush (Ctrl+F10)
+        if IS_WINDOWS:
+            try:
+                import keyboard
+                keyboard.add_hotkey('ctrl+f10', lambda: self.root.after(0, self._manual_flush_buffer), suppress=True)
+            except:
+                pass
+        elif HAS_PYNPUT:
+            # Pynput hotkey for F10 is more complex, skip for now
+            pass
         
         # Tray icon (Windows only)
         if IS_WINDOWS and HAS_TRAY:
             self._create_tray()
+    
+    def _toggle_llm_correction(self):
+        """Toggle LLM correction on/off."""
+        self.use_llm_correction = self.llm_enabled_var.get()
+        
+        if self.use_llm_correction:
+            # Initialize LLM client
+            server = self.llm_server_var.get()
+            model = self.llm_model_var.get()
+            self.llm_client = OllamaClient(server_url=server, model=model)
+            
+            # Test connection
+            if self.llm_client.test_connection():
+                self.llm_status_label.config(text="✓ Connected", fg="green")
+                print(f"LLM correction enabled: {server} - {model}")
+            else:
+                self.llm_status_label.config(text="⚠ Connection failed", fg="red")
+                messagebox.showwarning("LLM Connection", 
+                                      f"Could not connect to Ollama server at {server}\n"
+                                      "Transcription will continue without LLM correction.")
+        else:
+            self.llm_client = None
+            self.llm_status_label.config(text="")
+            print("LLM correction disabled")
+    
+    def _test_llm_connection(self):
+        """Test connection to LLM server."""
+        server = self.llm_server_var.get()
+        test_client = OllamaClient(server_url=server)
+        
+        if test_client.test_connection():
+            models = test_client.get_available_models()
+            messagebox.showinfo("LLM Connection Test", 
+                               f"✓ Connected to {server}\n\n"
+                               f"Available models: {len(models)}\n"
+                               f"{', '.join(models[:5])}"
+                               f"{'...' if len(models) > 5 else ''}")
+            self.llm_status_label.config(text="✓ Connected", fg="green")
+        else:
+            messagebox.showerror("LLM Connection Test", 
+                                f"✗ Could not connect to {server}\n\n"
+                                "Please check:\n"
+                                "1. Ollama is running\n"
+                                "2. Server address is correct\n"
+                                "3. Network connectivity")
+            self.llm_status_label.config(text="⚠ Not connected", fg="red")
+    
+    def _refresh_llm_models(self):
+        """Refresh available LLM models."""
+        server = self.llm_server_var.get()
+        client = OllamaClient(server_url=server)
+        
+        models = client.get_available_models()
+        if models:
+            self.llm_model_combo['values'] = models
+            messagebox.showinfo("Models Refreshed", 
+                               f"Found {len(models)} models:\n\n" + "\n".join(models))
+        else:
+            messagebox.showwarning("Models Refresh", 
+                                  "Could not retrieve models from server.\n"
+                                  "Make sure Ollama is running.")
+    
+    def _manual_flush_buffer(self):
+        """Manually flush the transcription buffer (force immediate processing)."""
+        if not self.use_llm_correction or not self.llm_client:
+            return
+        
+        if self.transcription_buffer.is_empty():
+            self.llm_status_label.config(text="Buffer empty", fg="gray")
+            return
+        
+        # Process buffer immediately
+        self.llm_status_label.config(text="🔄 Flushing buffer...", fg="orange")
+        threading.Thread(target=self._process_buffer_with_llm, daemon=True).start()
+    
+    def _process_buffer_with_llm(self):
+        """Process transcription buffer with LLM correction."""
+        if self.llm_processing or self.transcription_buffer.is_empty():
+            return
+        
+        self.llm_processing = True
+        
+        try:
+            chunks = self.transcription_buffer.get_chunks()
+            pause_duration = self.transcription_buffer.get_pause_duration()
+            
+            self.root.after(0, lambda: self.llm_status_label.config(
+                text=f"🔄 Correcting {len(chunks)} chunks...", fg="orange"))
+            
+            # Call LLM for correction
+            corrected_text = self.llm_client.correct_text(chunks, pause_duration)
+            
+            # Output corrected text
+            if corrected_text:
+                self.text_queue.put(corrected_text)
+                print(f"[LLM-CORRECTED] {corrected_text}")
+                self.last_output_time = time.time()
+            
+            # Clear buffer
+            self.transcription_buffer.clear()
+            
+            self.root.after(0, lambda: self.llm_status_label.config(text="✓ Corrected", fg="green"))
+            self.root.after(2000, lambda: self.llm_status_label.config(text="", fg="gray"))
+            
+        except Exception as e:
+            print(f"LLM processing error: {e}")
+            # Fallback: output uncorrected chunks
+            chunks = self.transcription_buffer.get_chunks()
+            for chunk in chunks:
+                self.text_queue.put(chunk)
+            self.transcription_buffer.clear()
+            self.root.after(0, lambda: self.llm_status_label.config(text="⚠ Error", fg="red"))
+        finally:
+            self.llm_processing = False
+    
     
     def _load_medical_vocabulary(self):
         """Load medical vocabulary from file."""
@@ -474,8 +735,22 @@ class TranscriberGUI:
                 return True
         
         words = text_clean.split()
+        
+        # Fix for single-word corrections: Allow single words if recent output exists
+        # This enables users to correct typos by highlighting and re-dictating
         if len(words) <= 1 and len(text_clean) < 10:
+            # Check if we recently output text (within last 10 seconds)
+            if hasattr(self, 'last_output_time') and self.last_output_time:
+                time_since_output = time.time() - self.last_output_time
+                if time_since_output < 10.0:
+                    # Recent output exists, likely a correction - allow it
+                    return False
+            # Check if word is in medical vocabulary
+            if self.medical_vocabulary and text_clean in self.medical_vocabulary:
+                return False
+            # Otherwise, likely a hallucination
             return True
+            
         if len(words) >= 2 and len(set(words)) == 1:
             return True
         return False
@@ -616,6 +891,38 @@ class TranscriberGUI:
         self.filter_var = tk.BooleanVar(value=True)
         tk.Checkbutton(settings_frame, text="Filter hallucinations", variable=self.filter_var).pack(side=tk.LEFT, padx=10)
         
+        # LLM Correction frame
+        llm_frame = tk.Frame(self.root)
+        llm_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.llm_enabled_var = tk.BooleanVar(value=False)
+        self.llm_check = tk.Checkbutton(
+            llm_frame,
+            text="🤖 LLM Correction",
+            variable=self.llm_enabled_var,
+            command=self._toggle_llm_correction,
+            font=("Helvetica", 10, "bold")
+        )
+        self.llm_check.pack(side=tk.LEFT, padx=5)
+        
+        tk.Label(llm_frame, text="Server:").pack(side=tk.LEFT, padx=(10, 2))
+        self.llm_server_var = tk.StringVar(value=self.llm_server)
+        server_entry = tk.Entry(llm_frame, textvariable=self.llm_server_var, width=25)
+        server_entry.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(llm_frame, text="Model:").pack(side=tk.LEFT, padx=(10, 2))
+        self.llm_model_var = tk.StringVar(value=self.llm_model)
+        self.llm_model_combo = ttk.Combobox(llm_frame, textvariable=self.llm_model_var, width=15, state='readonly')
+        self.llm_model_combo['values'] = [self.llm_model]
+        self.llm_model_combo.pack(side=tk.LEFT, padx=2)
+        
+        tk.Button(llm_frame, text="Test", command=self._test_llm_connection, width=6).pack(side=tk.LEFT, padx=5)
+        tk.Button(llm_frame, text="Refresh Models", command=self._refresh_llm_models, width=12).pack(side=tk.LEFT, padx=2)
+        tk.Button(llm_frame, text="Flush Buffer (Ctrl+F10)", command=self._manual_flush_buffer, width=20).pack(side=tk.LEFT, padx=5)
+        
+        self.llm_status_label = tk.Label(llm_frame, text="", font=("Helvetica", 9), fg="gray")
+        self.llm_status_label.pack(side=tk.RIGHT, padx=5)
+        
         # Level frame
         level_frame = tk.Frame(self.root)
         level_frame.pack(fill=tk.X, padx=10, pady=2)
@@ -666,12 +973,21 @@ class TranscriberGUI:
         self.previous_transcription = ""
         self.all_transcriptions = []
         
+        # Clear transcription buffer
+        self.transcription_buffer.clear()
+        self.last_chunk_time = time.time()
+        
         while not self.audio_queue.empty():
             try: self.audio_queue.get_nowait()
             except queue.Empty: break
         
         self.process_thread = threading.Thread(target=self._process_loop, daemon=True)
         self.process_thread.start()
+        
+        # Start buffer check thread if LLM is enabled
+        if self.use_llm_correction:
+            self.buffer_check_thread = threading.Thread(target=self._buffer_check_loop, daemon=True)
+            self.buffer_check_thread.start()
         
         self.audio_stream = sd.InputStream(
             samplerate=self.sample_rate, channels=1, dtype=np.float32,
@@ -685,10 +1001,27 @@ class TranscriberGUI:
         self.status_label.config(text="Listening...")
         
         self._update_tray(True)
+    
+    def _buffer_check_loop(self):
+        """Periodically check if buffer should be processed."""
+        while self.is_recording:
+            time.sleep(0.5)  # Check every 500ms
+            
+            if not self.use_llm_correction or not self.llm_client:
+                continue
+            
+            if self.transcription_buffer.should_process() and not self.llm_processing:
+                # User paused, process buffer
+                self._process_buffer_with_llm()
 
     def _stop_recording(self):
         self.is_recording = False
         time.sleep(0.2)
+        
+        # Process any remaining buffer
+        if self.use_llm_correction and not self.transcription_buffer.is_empty():
+            self._process_buffer_with_llm()
+            time.sleep(1.0)  # Wait for LLM processing
         
         with self.audio_lock:
             if len(self.audio_buffer) > self.sample_rate * self.min_audio_duration:
@@ -869,9 +1202,30 @@ class TranscriberGUI:
                     self.all_transcriptions.append(cleaned_text)
                     if len(self.all_transcriptions) > 10:
                         self.all_transcriptions = self.all_transcriptions[-10:]
-                    self.text_queue.put(cleaned_text)
-                    mode_tag = "MED-VOCAB" if self.use_medical_vocab else self.device.upper()
-                    print(f"[{mode_tag}] {cleaned_text}")
+                    
+                    # Handle output based on LLM correction mode
+                    if self.use_llm_correction and self.llm_client:
+                        # Add to buffer for LLM processing
+                        self.transcription_buffer.add_chunk(cleaned_text)
+                        self.last_chunk_time = time.time()
+                        
+                        # Update buffer status
+                        buf_size = self.transcription_buffer.size()
+                        self.root.after(0, lambda: self.llm_status_label.config(
+                            text=f"📝 Buffered: {buf_size} chunks", fg="blue"))
+                        
+                        mode_tag = "LLM-BUFFERED"
+                        print(f"[{mode_tag}] Added to buffer: {cleaned_text[:50]}...")
+                        
+                        # Check if should process buffer (user paused)
+                        if self.transcription_buffer.should_process():
+                            threading.Thread(target=self._process_buffer_with_llm, daemon=True).start()
+                    else:
+                        # Direct output (no LLM correction)
+                        self.text_queue.put(cleaned_text)
+                        self.last_output_time = time.time()
+                        mode_tag = "MED-VOCAB" if self.use_medical_vocab else self.device.upper()
+                        print(f"[{mode_tag}] {cleaned_text}")
             
             self.root.after(0, lambda: self.status_label.config(text="Listening..."))
             
