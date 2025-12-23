@@ -225,6 +225,7 @@ class TranscriberGUI:
         "bye", "goodbye", "the end", "music", "applause", "laughter",
         "silence", "...", "you", "i'm sorry", "sorry", "okay", "ok",
         "um", "uh", "hmm", "mhm",
+        "_", "__", "___",  # Filter underscore patterns
     ]
     
     MODELS = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
@@ -266,6 +267,12 @@ class TranscriberGUI:
         self.text_queue = queue.Queue()
         self.model = None
         self.current_model_size = None
+        
+        # Transcription tracking for hang detection
+        self.transcription_in_progress = False
+        self.last_transcription_start = None
+        self.transcription_timeout = 30.0  # seconds
+        self.active_transcription_threads = 0
         
         # Audio buffer
         self.audio_lock = threading.Lock()
@@ -453,6 +460,14 @@ class TranscriberGUI:
             return True
         text_lower = text.lower().strip()
         text_clean = re.sub(r'[^\w\s]', '', text_lower).strip()
+        
+        # Check for underscore patterns (common transcription glitch)
+        if '_' in text or text.count('_') > 5:
+            return True
+        
+        # Check if text is mostly underscores
+        if len(text) > 0 and text.count('_') / len(text) > 0.3:
+            return True
         
         for h in self.HALLUCINATIONS:
             if text_clean == h:
@@ -751,6 +766,15 @@ class TranscriberGUI:
                         is_continuation = True
                 
                 if should_transcribe:
+                    # Check if too many transcription threads are active (potential hang)
+                    if self.active_transcription_threads >= 3:
+                        print(f"WARNING: {self.active_transcription_threads} transcription threads active. Possible hang detected.")
+                        # Skip this transcription to prevent further backup
+                        self.audio_buffer = np.array([], dtype=np.float32)
+                        self.silence_samples = 0
+                        self.speech_samples = 0
+                        continue
+                    
                     speech_ratio = self.speech_samples / len(self.audio_buffer) if len(self.audio_buffer) > 0 else 0
                     
                     if speech_ratio < self.min_speech_ratio:
@@ -779,7 +803,8 @@ class TranscriberGUI:
                         self.speech_samples = 0
                     self.silence_samples = 0
                     
-                    threading.Thread(target=self._transcribe, args=(audio_to_process, False, is_continuation), daemon=True).start()
+                    self.active_transcription_threads += 1
+                    threading.Thread(target=self._transcribe_wrapper, args=(audio_to_process, False, is_continuation), daemon=True).start()
 
     def _update_level(self, rms):
         level = min(150, int(rms * 1500))
@@ -787,6 +812,15 @@ class TranscriberGUI:
         self.level_canvas.coords(self.level_bar, 0, 0, level, 18)
         self.level_canvas.itemconfig(self.level_bar, fill=color)
 
+    def _transcribe_wrapper(self, audio, is_final=False, is_continuation=False):
+        """Wrapper to track active transcription threads."""
+        try:
+            self._transcribe(audio, is_final, is_continuation)
+        finally:
+            self.active_transcription_threads -= 1
+            if self.active_transcription_threads < 0:
+                self.active_transcription_threads = 0
+    
     def _transcribe(self, audio, is_final=False, is_continuation=False):
         if len(audio) < self.sample_rate * self.min_audio_duration:
             return
@@ -806,6 +840,10 @@ class TranscriberGUI:
             audio_duration = len(audio) / self.sample_rate
             rtf = elapsed / audio_duration
             
+            # Warn if transcription is unusually slow
+            if rtf > 3.0:
+                print(f"WARNING: Slow transcription detected (RTF: {rtf:.2f}x)")
+            
             self.root.after(0, lambda: self.perf_label.config(
                 text=f"RTF: {rtf:.2f}x",
                 fg="green" if rtf < 0.5 else "orange" if rtf < 1 else "red"
@@ -813,8 +851,13 @@ class TranscriberGUI:
             
             cleaned_text = self._clean_transcription(full_text)
             
+            # Log raw output if it looks suspicious
+            if cleaned_text and ('_' in cleaned_text or len(cleaned_text) > 500):
+                print(f"SUSPICIOUS OUTPUT: {cleaned_text[:200]}...")
+            
             if self.filter_var.get() and self._is_hallucination(cleaned_text):
                 self.root.after(0, lambda: self.status_label.config(text="Listening..."))
+                print(f"Filtered hallucination: {cleaned_text[:50]}...")
                 return
             
             if cleaned_text:
@@ -833,8 +876,19 @@ class TranscriberGUI:
             self.root.after(0, lambda: self.status_label.config(text="Listening..."))
             
         except Exception as e:
+            import traceback
             print(f"Transcription error: {e}")
-            self.root.after(0, lambda: self.status_label.config(text="Error"))
+            print(traceback.format_exc())
+            self.root.after(0, lambda: self.status_label.config(text="Error - Check Console"))
+            # Try to recover by clearing the model cache
+            if "CUDA" in str(e) or "memory" in str(e).lower():
+                print("Attempting to clear CUDA cache...")
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except:
+                    pass
     
     def _transcribe_with_general_model(self, audio):
         """Transcribe using faster-whisper general model with optional medical vocabulary."""
@@ -857,6 +911,10 @@ class TranscriberGUI:
             else:
                 initial_prompt = f"Medical terms: {vocab_hint}"
         
+        # Limit initial_prompt length to prevent issues
+        if initial_prompt and len(initial_prompt) > 500:
+            initial_prompt = initial_prompt[:500]
+        
         segments, info = self.model.transcribe(
             audio, language="en", beam_size=5, best_of=5, temperature=0.0,
             vad_filter=True, vad_parameters=dict(min_silence_duration_ms=500, threshold=0.5),
@@ -867,7 +925,14 @@ class TranscriberGUI:
         text_parts = [seg.text.strip() for seg in segments 
                      if not (hasattr(seg, 'no_speech_prob') and seg.no_speech_prob > 0.5)]
         
-        return " ".join(text_parts).strip()
+        result = " ".join(text_parts).strip()
+        
+        # Additional validation - reject if result is mostly underscores
+        if result and result.count('_') > len(result) * 0.5:
+            print(f"Rejecting underscore-heavy output: {result[:100]}")
+            return ""
+        
+        return result
     
 
 
