@@ -1,6 +1,6 @@
 # Whisper Real-Time Transcriber
 
-A cross-platform real-time speech-to-text transcription application powered by OpenAI Whisper with customizable medical vocabulary injection for enhanced transcription accuracy.
+A cross-platform real-time speech-to-text transcription application powered by OpenAI Whisper with LLM-based intelligent correction, customizable medical vocabulary injection, and advanced post-processing for enhanced transcription accuracy.
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2011%20%7C%20Linux-blue)
 ![Python](https://img.shields.io/badge/Python-3.11-green)
@@ -8,17 +8,30 @@ A cross-platform real-time speech-to-text transcription application powered by O
 
 ## ✨ Features
 
+### Core Transcription
 - **Real-time Transcription**: Continuous speech-to-text conversion with Voice Activity Detection (VAD)
 - **Multiple Whisper Models**: Choose from tiny, base, small, medium, large-v2, large-v3
-- **Medical Vocabulary Injection**: Optional medical terminology context for improved medical transcription
 - **GPU Acceleration**: Automatic CUDA detection and utilization (RTX 5090 supported)
 - **Microphone Gain Control**: Adjustable 1.0x-5.0x amplification for quiet microphones
-- **Global Hotkey**: Toggle recording with Ctrl+F9
+- **Global Hotkeys**: Ctrl+F9 to toggle recording, Ctrl+F10 to flush buffer
 - **Flexible Output**: Display in window, type at cursor position, or both
-- **Customizable Medical Vocabulary**: Edit `medical_vocabulary.txt` to add your own terms
-- **Hallucination Filtering**: Intelligent filtering of common transcription artifacts
 - **Cross-Platform**: Works on Windows 11 and Linux (Ubuntu)
 - **System Tray Integration**: Minimize to system tray (Windows)
+
+### 🤖 NEW: LLM Intelligent Correction (v4.0)
+- **Buffered Correction**: Automatically fixes sentence fragments and punctuation
+- **Ollama Integration**: Uses local LLM (llama3.2:3b by default) for post-processing
+- **Pause Detection**: Processes buffer when you pause (3-second threshold)
+- **Model Selection**: Choose from any installed Ollama model via GUI
+- **Clean Output**: Corrected text appears in window AND at cursor position
+- **Manual Flush**: Force immediate processing with Ctrl+F10 hotkey
+- **[See Full LLM Guide →](LLM_CORRECTION_GUIDE.md)**
+
+### Medical & Vocabulary Features
+- **Medical Vocabulary Injection**: Optional medical terminology context for improved transcription
+- **Customizable Vocabulary**: Edit `medical_vocabulary.txt` to add your own terms
+- **Context-Aware Filtering**: Intelligent hallucination filtering with single-word correction support
+- **Hallucination Filtering**: Smart filtering of common transcription artifacts
 
 ## 📋 Requirements
 
@@ -26,6 +39,10 @@ A cross-platform real-time speech-to-text transcription application powered by O
 - **Operating System**: Windows 11 or Linux (Ubuntu 20.04+)
 - **Python**: 3.11 (recommended)
 - **Miniconda**: Already installed
+- **Ollama** (Optional, for LLM correction): Local LLM server
+  - Download from: https://ollama.ai
+  - Install models: `ollama pull llama3.2:3b`
+  - Default server: http://192.168.50.134:11434 (configurable)
 - **CUDA**: (Optional) For GPU acceleration - must be installed separately
   - Download from: https://developer.nvidia.com/cuda-downloads
   - For RTX 50-series (5090): CUDA 12.4+ required
@@ -40,11 +57,12 @@ A cross-platform real-time speech-to-text transcription application powered by O
   - Minimum: 4GB (for tiny/base models on CPU)
   - Recommended: 8GB+ (for larger models)
   - With Medical Vocabulary: 8GB+ recommended
+  - With LLM Correction: 16GB+ recommended
 - **GPU** (Optional but recommended):
   - NVIDIA GPU with 4GB+ VRAM for base/small models
   - 6GB+ VRAM for medium models
   - 8GB+ VRAM for large models
-  - RTX 5090 (32GB): Excellent performance with all models
+  - RTX 5090 (32GB): Excellent performance with all models + LLM
 - **Microphone**: Any standard audio input device
 
 ## 🚀 Quick Start
@@ -184,6 +202,70 @@ pip install -r requirements.txt
 ### Hotkey Controls
 
 - **Ctrl+F9**: Toggle recording on/off (global hotkey works even when app is minimized)
+- **Ctrl+F10**: Flush LLM buffer (force immediate processing of buffered text)
+
+### 🤖 LLM Intelligent Correction (NEW in v4.0)
+
+#### What is LLM Correction?
+
+LLM Correction uses a local Large Language Model (Ollama) to automatically fix:
+- ✅ Sentence fragments caused by pauses
+- ✅ Incorrect punctuation and capitalization  
+- ✅ Unnatural transcription breaks
+- ✅ Grammar and flow issues
+
+**Example:**
+```
+WITHOUT LLM:                    WITH LLM:
+"The patient has acute"    →   "The patient has acute hypertension
+"Hypertension with"             with chest pain. Blood pressure
+"chest pain"                    is 180 over 95."
+"Blood pressure is 180"
+"over 95"
+```
+
+#### How to Use LLM Correction
+
+1. **Install Ollama** (if not already installed):
+   ```bash
+   curl https://ollama.ai/install.sh | sh
+   ollama pull llama3.2:3b
+   ```
+
+2. **Enable in GUI**:
+   - Check the **"🤖 LLM Correction"** checkbox
+   - Configure server URL (default: http://192.168.50.134:11434)
+   - Select model from dropdown
+   - Click "Test" to verify connection
+
+3. **Dictate normally**:
+   - Text is buffered as you speak
+   - Pause for 3+ seconds to trigger processing
+   - LLM corrects and outputs clean text
+   - Or press **Ctrl+F10** to force immediate processing
+
+4. **See Results**:
+   - Status shows: `📝 Buffered: 3 chunks` while accumulating
+   - Then: `🔄 Correcting...` during LLM processing
+   - Finally: `✓ Corrected` when complete
+
+#### When to Use LLM Correction
+
+✅ **Use when:**
+- Dictating medical notes or formal documents
+- Accuracy is more important than speed
+- You naturally pause between thoughts
+- You want clean output without manual editing
+
+❌ **Disable when:**
+- You need instant feedback
+- Taking quick, fragmented notes
+- Ollama is not available
+- Speed is critical
+
+**Performance:** Adds 3-5 second delay (includes pause + processing), but output is significantly cleaner.
+
+**[→ Full LLM Correction Guide](LLM_CORRECTION_GUIDE.md)** for detailed setup and troubleshooting.
 
 ### Model Selection Guide
 
