@@ -247,22 +247,34 @@ class OllamaClient:
             print(f"Error fetching models: {e}")
             return []
     
-    def correct_text(self, chunks, pause_duration=0.0):
+    def correct_text(self, chunks, pause_duration=0.0, medical_vocabulary=None):
         """Send chunks to LLM for correction."""
         try:
             # Build prompt
             chunks_text = "\n".join(f"{i+1}: {chunk}" for i, chunk in enumerate(chunks))
             
-            prompt = f"""You are a text correction assistant. Your job is to fix transcription errors.
+            # Add medical vocabulary hints if provided
+            vocab_hint = ""
+            if medical_vocabulary:
+                # Sample up to 30 medical terms for context
+                vocab_sample = list(medical_vocabulary)[:30]
+                vocab_hint = f"""
+MEDICAL VOCABULARY REFERENCE (use these for spelling corrections):
+{', '.join(vocab_sample)}
+"""
+            
+            prompt = f"""You are a text correction assistant for medical transcription. Your job is to fix transcription errors.
 
-TASK: Merge sentence fragments and fix punctuation in the following transcribed segments.
+TASK: Correct spelling errors, merge sentence fragments, and fix punctuation in the following transcribed segments.
 
 RULES:
-1. Preserve the exact original wording - do not paraphrase or add new words
-2. Only merge fragments that clearly belong to the same sentence
-3. If the pause was very long (>{pause_duration:.0f} seconds), keep segments separate
-4. Fix capitalization and punctuation only
-
+1. FIX spelling errors, especially medical terminology (e.g., "amalodosis" → "amyloidosis", "polychondromatosis" → "polychondritis", "pathonomonic" → "pathognomonic")
+2. DO NOT paraphrase or change the sentence structure
+3. DO NOT add new information or words that weren't spoken
+4. Only merge fragments that clearly belong to the same sentence
+5. If the pause was very long (>{pause_duration:.0f} seconds), keep segments separate as separate paragraphs
+6. Fix capitalization and punctuation
+{vocab_hint}
 SEGMENTS:
 {chunks_text}
 
@@ -282,7 +294,7 @@ CORRECTED TEXT:"""
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
-                    "system": "You are a silent text correction assistant. Output only corrected text with no commentary, explanations, or meta-information.",
+                    "system": "You are a medical transcription correction assistant. Fix spelling errors (especially medical terms), merge fragments, and correct punctuation. Output only the corrected text with no commentary or explanations.",
                     "options": {
                         "temperature": 0.1,  # Lower temperature for more deterministic output
                         "top_p": 0.9,
@@ -628,8 +640,9 @@ class TranscriberGUI:
             self.root.after(0, lambda: self.llm_status_label.config(
                 text=f"🔄 Correcting {len(chunks)} chunks...", fg="orange"))
             
-            # Call LLM for correction
-            corrected_text = self.llm_client.correct_text(chunks, pause_duration)
+            # Call LLM for correction (pass medical vocabulary if available)
+            medical_vocab = self.medical_vocabulary if hasattr(self, 'medical_vocabulary') else None
+            corrected_text = self.llm_client.correct_text(chunks, pause_duration, medical_vocab)
             
             # Output corrected text
             if corrected_text:
