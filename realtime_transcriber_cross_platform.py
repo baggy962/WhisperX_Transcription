@@ -505,7 +505,7 @@ class TranscriberGUI:
         self.llm_server = "http://192.168.50.134:11434"
         self.llm_model = "llama3.2:3b"
         self.llm_client = None
-        self.transcription_buffer = TranscriptionBuffer(max_size=5, pause_threshold=3.0)
+        self.transcription_buffer = TranscriptionBuffer(max_size=10, pause_threshold=4.0)
         self.llm_processing = False
         self.last_chunk_time = time.time()
         
@@ -625,6 +625,20 @@ class TranscriberGUI:
         # Process buffer immediately
         self.llm_status_label.config(text="🔄 Flushing buffer...", fg="orange")
         threading.Thread(target=self._process_buffer_with_llm, daemon=True).start()
+    
+    def _update_buffer_settings(self):
+        """Update buffer size and pause threshold when user changes settings."""
+        new_size = self.buffer_size_var.get()
+        new_pause = self.buffer_pause_var.get()
+        
+        # Update buffer settings
+        self.transcription_buffer = TranscriptionBuffer(max_size=new_size, pause_threshold=new_pause)
+        
+        print(f"Buffer settings updated: max_size={new_size}, pause_threshold={new_pause}s")
+        
+        # Show feedback
+        self.llm_status_label.config(text=f"Buffer: {new_size} chunks, {new_pause}s pause", fg="blue")
+        self.root.after(3000, lambda: self.llm_status_label.config(text="", fg="gray"))
     
     def _process_buffer_with_llm(self):
         """Process transcription buffer with LLM correction."""
@@ -1006,6 +1020,29 @@ class TranscriberGUI:
         
         self.llm_status_label = tk.Label(llm_frame, text="", font=("Helvetica", 9), fg="gray")
         self.llm_status_label.pack(side=tk.RIGHT, padx=5)
+        
+        # LLM Buffer Settings frame
+        llm_buffer_frame = tk.Frame(self.root)
+        llm_buffer_frame.pack(fill=tk.X, padx=10, pady=2)
+        
+        tk.Label(llm_buffer_frame, text="  Buffer Settings:", font=("Helvetica", 9)).pack(side=tk.LEFT, padx=(5, 10))
+        
+        tk.Label(llm_buffer_frame, text="Max Chunks:").pack(side=tk.LEFT, padx=(5, 2))
+        self.buffer_size_var = tk.IntVar(value=10)
+        buffer_size_spinbox = tk.Spinbox(llm_buffer_frame, from_=3, to=20, width=5, 
+                                         textvariable=self.buffer_size_var,
+                                         command=self._update_buffer_settings)
+        buffer_size_spinbox.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(llm_buffer_frame, text="Pause Threshold (s):").pack(side=tk.LEFT, padx=(10, 2))
+        self.buffer_pause_var = tk.DoubleVar(value=4.0)
+        buffer_pause_spinbox = tk.Spinbox(llm_buffer_frame, from_=2.0, to=10.0, increment=0.5, width=5,
+                                          textvariable=self.buffer_pause_var, format="%.1f",
+                                          command=self._update_buffer_settings)
+        buffer_pause_spinbox.pack(side=tk.LEFT, padx=2)
+        
+        tk.Label(llm_buffer_frame, text="(Larger buffer = better context, longer delay)", 
+                font=("Helvetica", 8), fg="gray").pack(side=tk.LEFT, padx=10)
         
         # Level frame
         level_frame = tk.Frame(self.root)
