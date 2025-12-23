@@ -253,17 +253,27 @@ class OllamaClient:
             # Build prompt
             chunks_text = "\n".join(f"{i+1}: {chunk}" for i, chunk in enumerate(chunks))
             
-            prompt = f"""Fix any sentence fragments or punctuation errors in these transcribed text segments.
-Preserve the original wording as much as possible.
-Only merge fragments if they clearly belong together.
-If pause was long (>5 seconds), treat as separate paragraphs.
+            prompt = f"""You are a text correction assistant. Your job is to fix transcription errors.
 
-Segments (in order):
+TASK: Merge sentence fragments and fix punctuation in the following transcribed segments.
+
+RULES:
+1. Preserve the exact original wording - do not paraphrase or add new words
+2. Only merge fragments that clearly belong to the same sentence
+3. If the pause was very long (>{pause_duration:.0f} seconds), keep segments separate
+4. Fix capitalization and punctuation only
+
+SEGMENTS:
 {chunks_text}
 
-Pause after last segment: {pause_duration:.1f} seconds
+CRITICAL: Output ONLY the corrected text. Do NOT include:
+- Explanations like "I'm going to..."
+- Meta-commentary about what you did
+- Notes in parentheses about changes
+- The word "Pause" or pause information
+- ANY text other than the corrected transcription
 
-Output only the corrected text with no explanations or comments:"""
+CORRECTED TEXT:"""
             
             # Call Ollama API
             response = requests.post(
@@ -272,9 +282,11 @@ Output only the corrected text with no explanations or comments:"""
                     "model": self.model,
                     "prompt": prompt,
                     "stream": False,
+                    "system": "You are a silent text correction assistant. Output only corrected text with no commentary, explanations, or meta-information.",
                     "options": {
-                        "temperature": 0.3,
+                        "temperature": 0.1,  # Lower temperature for more deterministic output
                         "top_p": 0.9,
+                        "stop": ["Pause", "Note:", "(I ", "I'm going", "I added"],  # Stop tokens
                     }
                 },
                 timeout=self.timeout
@@ -282,7 +294,19 @@ Output only the corrected text with no explanations or comments:"""
             
             if response.status_code == 200:
                 result = response.json()
-                corrected = result.get('response', '').strip()
+                raw_output = result.get('response', '').strip()
+                
+                # Log raw LLM output for debugging
+                if raw_output:
+                    print(f"[LLM-RAW] {raw_output[:200]}...")
+                
+                # Clean up LLM meta-commentary if it sneaks through
+                corrected = self._clean_llm_output(raw_output)
+                
+                # Log cleaned output
+                if corrected != raw_output:
+                    print(f"[LLM-CLEANED] {corrected[:200]}...")
+                
                 return corrected if corrected else " ".join(chunks)
             else:
                 print(f"LLM API error: {response.status_code}")
@@ -292,6 +316,53 @@ Output only the corrected text with no explanations or comments:"""
             print(f"LLM correction error: {e}")
             # Fallback: just join the chunks
             return " ".join(chunks)
+    
+    def _clean_llm_output(self, text):
+        """Remove LLM meta-commentary from output."""
+        if not text:
+            return text
+        
+        lines = text.split('\n')
+        cleaned_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            
+            # Skip lines that are clearly LLM commentary
+            skip_patterns = [
+                'pause after last segment',
+                'there was a pause',
+                'i\'m going to',
+                'i added',
+                'i merged',
+                'i fixed',
+                'corrected:',
+                'here is the',
+                'here\'s the',
+                '(i added',
+                '(i merged',
+                '(note:',
+            ]
+            
+            # Check if line should be skipped
+            line_lower = line.lower()
+            should_skip = any(pattern in line_lower for pattern in skip_patterns)
+            
+            # Skip lines that are just parenthetical notes
+            if line.startswith('(') and line.endswith(')'):
+                should_skip = True
+            
+            if not should_skip and line:
+                cleaned_lines.append(line)
+        
+        # Join lines back together
+        result = ' '.join(cleaned_lines)
+        
+        # Remove any remaining parenthetical notes at the end
+        import re
+        result = re.sub(r'\s*\([^)]*\)\s*$', '', result)
+        
+        return result.strip()
 
 
 class TranscriptionBuffer:
